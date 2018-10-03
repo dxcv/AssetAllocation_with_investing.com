@@ -42,7 +42,10 @@ for csv_file in csv_file_list:
     if csv_file[-3:] != 'csv':
         continue
 
-    if csv_file[:-20] in ('US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures'):
+    if csv_file[:-20] in ('FTSE China 50 Total Return', 'iBovespa Futures'
+                          , 'MSCI Brazil 25-50 Net Return', 'MSCI International EAFE Net'
+                          , 'MVIS Global Junior Gold Miners TR Net', 'Nifty 50 Futures', 'MVIS Russia TR Net'
+                          , 'US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures'):
         print('Pass: ', csv_file[:-20])
         continue
 
@@ -255,7 +258,7 @@ for prd_idx, index in enumerate(pivoted_droped_data.index):
         for col_idx, column in enumerate(pivoted_droped_data.columns):
             profit += rst_weights[col_idx] \
                       * (pivoted_filled_datas[column][prd_idx + period_term] / pivoted_filled_datas[column][prd_idx + period_term - 1] - 1)
-            #print(rst_weights[col_idx], pivoted_filled_datas[column][prd_idx + period_term], pivoted_filled_datas[column][prd_idx + period_term - 1])
+            print(column, rst_weights[col_idx] * (pivoted_filled_datas[column][prd_idx + period_term] / pivoted_filled_datas[column][prd_idx + period_term - 1] - 1))
         print(pivoted_droped_data.index[prd_idx + period_term - 1], profit)
     total_profit += profit
 print(total_profit)
