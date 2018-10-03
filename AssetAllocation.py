@@ -42,6 +42,10 @@ for csv_file in csv_file_list:
     if csv_file[-3:] != 'csv':
         continue
 
+    if csv_file[:-20] in ('US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures'):
+        print('Pass: ', csv_file[:-20])
+        continue
+
     df = pd.read_csv('%s%s' % (folder_dir, csv_file)) # Read CSV file
     df['Name'] = csv_file[:-20] # Set name of data
     df['Date2'] = df['Date'].apply(lambda x: parser.parse(x)) # Change date format
@@ -122,10 +126,11 @@ for row_nm in row_list:
     for column_nm in pivoted_droped_data.columns:
         if math.isnan(pivoted_droped_data[column_nm][row_nm]) == True:
             pivoted_droped_data.drop(index=row_nm, inplace=True)
+            pivoted_filled_datas.drop(index=row_nm, inplace=True)
             break
 
 
-if 0:
+if 1:
     SaveExcelFiles(file='pivoted_data.xlsx', obj_dict={'pivoted_reference_datas': pivoted_reference_datas
         , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
         , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
@@ -201,7 +206,10 @@ def RP_TargetVol(rets, Target, lb, ub):
         vol_diffs = (Target * 1.05) - sigma_scale
         return (vol_diffs)
 
-        # --- Calculate Portfolio ---#
+    def TotalWgt_const(x):
+        return x.sum() - 1
+
+    # --- Calculate Portfolio ---#
 
     x0 = np.repeat(1 / covmat.shape[1], covmat.shape[1])
     #print(x0)
@@ -209,8 +217,9 @@ def RP_TargetVol(rets, Target, lb, ub):
     ubound = np.repeat(ub, covmat.shape[1])
     bnds = tuple(zip(lbound, ubound))
     constraints = ({'type': 'ineq', 'fun': TargetVol_const_lower},
-                   {'type': 'ineq', 'fun': TargetVol_const_upper})
-    options = {'ftol': 1e-20, 'maxiter': 5000, 'disp': True}
+                   {'type': 'ineq', 'fun': TargetVol_const_upper},
+                   {'type': 'eq', 'fun': TotalWgt_const})
+    options = {'ftol': 1e-20, 'maxiter': 5000, 'disp': False}
 
     result = minimize(fun=RiskParity_objective,
                       x0=x0,
@@ -218,26 +227,35 @@ def RP_TargetVol(rets, Target, lb, ub):
                       constraints=constraints,
                       options=options,
                       bounds=bnds)
-    print(result)
-    return (result.x)
+    #print(result)
+    return (result.fun, result.x)
 
-
+total_profit = 0
 period_term = 12
-for prd_idx, a in enumerate(pivoted_droped_data.index):
+for prd_idx, index in enumerate(pivoted_droped_data.index):
     if prd_idx + period_term > len(pivoted_droped_data):
         print('break', prd_idx + period_term, len(pivoted_droped_data))
         break
 
-    result = RP_TargetVol(pivoted_droped_data[prd_idx:prd_idx + period_term], Target=0.20, lb=0.10, ub=0.30)
-    #print(result)
+    # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
+    rst_value, rst_weights = RP_TargetVol(pivoted_droped_data[prd_idx:prd_idx + period_term], Target=0.08, lb=0.0, ub=0.20)
+    #print()
 
     total_weight = 0
-    result_dict = {}
-    for rst_idx, weight in enumerate(result):
-        total_weight += weight
+    rst_dict = {"Value": rst_value}
+    for rst_idx, weight in enumerate(rst_weights):
+        total_weight += weight * 100
         #print(pivoted_droped_data.columns[idx], weight)
-        result_dict[pivoted_droped_data.columns[rst_idx]] = float(weight * 100)
+        rst_dict[pivoted_droped_data.columns[rst_idx]] = int(weight * 100)
     #print('현금', 1.0 - total_weight)
-    result_dict['현금'] = 1.0 - total_weight
-    print(prd_idx, pivoted_droped_data.index[prd_idx + period_term - 1], result_dict)
-
+    rst_dict['현금'] = 100 - total_weight
+    #print(prd_idx, pivoted_droped_data.index[prd_idx + period_term - 1], rst_dict)
+    if prd_idx + period_term < len(pivoted_droped_data):
+        profit = 0
+        for col_idx, column in enumerate(pivoted_droped_data.columns):
+            profit += rst_weights[col_idx] \
+                      * (pivoted_filled_datas[column][prd_idx + period_term] / pivoted_filled_datas[column][prd_idx + period_term - 1] - 1)
+            #print(rst_weights[col_idx], pivoted_filled_datas[column][prd_idx + period_term], pivoted_filled_datas[column][prd_idx + period_term - 1])
+        print(pivoted_droped_data.index[prd_idx + period_term - 1], profit)
+    total_profit += profit
+print(total_profit)
