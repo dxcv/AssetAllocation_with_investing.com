@@ -133,18 +133,11 @@ for row_nm in row_list:
             break
 
 
-if 1:
-    SaveExcelFiles(file='pivoted_data.xlsx', obj_dict={'pivoted_reference_datas': pivoted_reference_datas
-        , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
-        , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
-        , 'pivoted_droped_data': pivoted_droped_data})
 
-
-
-
-def RP_TargetVol(rets, Target, lb, ub):
+def ObjectiveVol(rets, objective_type, target, lb, ub):
     rets.index = pd.to_datetime(rets.index)
     covmat = pd.DataFrame.cov(rets)
+    var_list = pd.DataFrame.var(rets)
 
     def annualize_scale(rets):
 
@@ -177,7 +170,7 @@ def RP_TargetVol(rets, Target, lb, ub):
 
     # --- Risk Budget Portfolio Objective Function ---#
 
-    def RiskParity_objective(x):
+    def EqualRiskContribution_objective(x):
 
         variance = x.T @ covmat @ x
         sigma = variance ** 0.5
@@ -187,7 +180,23 @@ def RP_TargetVol(rets, Target, lb, ub):
         a = np.reshape(rc.values, (len(rc), 1))
         risk_diffs = a - a.T
         sum_risk_diffs_squared = np.sum(np.square(np.ravel(risk_diffs)))
+
         return (sum_risk_diffs_squared)
+
+    def MinVariance_objective(x):
+
+        variance = x.T @ covmat @ x
+        sigma = variance ** 0.5
+
+        return (sigma)
+
+    def MostDiversifiedPortfolio_objective(x):
+
+        portfolio_variance = x.T @ covmat @ x
+        portfolio_sigma = portfolio_variance ** 0.5
+        weighted_sum_sigma = x @ (var_list ** 0.5)
+
+        return (portfolio_sigma / weighted_sum_sigma)
 
     # --- Constraints ---#
 
@@ -197,7 +206,8 @@ def RP_TargetVol(rets, Target, lb, ub):
         sigma = variance ** 0.5
         sigma_scale = sigma * np.sqrt(annualize_scale(rets))
 
-        vol_diffs = sigma_scale - (Target * 0.95)
+        vol_diffs = sigma_scale - (target * 0.95)
+
         return (vol_diffs)
 
     def TargetVol_const_upper(x):
@@ -206,10 +216,12 @@ def RP_TargetVol(rets, Target, lb, ub):
         sigma = variance ** 0.5
         sigma_scale = sigma * np.sqrt(annualize_scale(rets))
 
-        vol_diffs = (Target * 1.05) - sigma_scale
+        vol_diffs = (target * 1.05) - sigma_scale
+
         return (vol_diffs)
 
     def TotalWgt_const(x):
+
         return x.sum() - 1
 
     # --- Calculate Portfolio ---#
@@ -224,7 +236,15 @@ def RP_TargetVol(rets, Target, lb, ub):
                    {'type': 'eq', 'fun': TotalWgt_const})
     options = {'ftol': 1e-20, 'maxiter': 5000, 'disp': False}
 
-    result = minimize(fun=RiskParity_objective,
+    obejctive_func = EqualRiskContribution_objective
+    if objective_type == 1:
+        obejctive_func = EqualRiskContribution_objective
+    elif objective_type == 2:
+        obejctive_func = MinVariance_objective
+    elif objective_type == 3:
+        obejctive_func = MostDiversifiedPortfolio_objective
+
+    result = minimize(fun=obejctive_func,
                       x0=x0,
                       method='SLSQP',
                       constraints=constraints,
@@ -233,32 +253,43 @@ def RP_TargetVol(rets, Target, lb, ub):
     #print(result)
     return (result.fun, result.x)
 
-total_profit = 0
+
+objective_type = 2
+total_profit = 1
 period_term = 12
+output = {}
 for prd_idx, index in enumerate(pivoted_droped_data.index):
-    if prd_idx + period_term > len(pivoted_droped_data):
+
+    date = pivoted_droped_data.index[prd_idx + period_term - 1]
+
+    #
+    if prd_idx + period_term >= len(pivoted_droped_data):
         print('break', prd_idx + period_term, len(pivoted_droped_data))
         break
 
     # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
-    rst_value, rst_weights = RP_TargetVol(pivoted_droped_data[prd_idx:prd_idx + period_term], Target=0.08, lb=0.0, ub=0.20)
-    #print()
+    output[date] = {}
+    rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.0, ub=0.20)
 
     total_weight = 0
     rst_dict = {"Value": rst_value}
     for rst_idx, weight in enumerate(rst_weights):
         total_weight += weight * 100
-        #print(pivoted_droped_data.columns[idx], weight)
         rst_dict[pivoted_droped_data.columns[rst_idx]] = int(weight * 100)
-    #print('현금', 1.0 - total_weight)
     rst_dict['현금'] = 100 - total_weight
-    #print(prd_idx, pivoted_droped_data.index[prd_idx + period_term - 1], rst_dict)
+
+    profit = 0
     if prd_idx + period_term < len(pivoted_droped_data):
-        profit = 0
         for col_idx, column in enumerate(pivoted_droped_data.columns):
-            profit += rst_weights[col_idx] \
-                      * (pivoted_filled_datas[column][prd_idx + period_term] / pivoted_filled_datas[column][prd_idx + period_term - 1] - 1)
-            print(column, rst_weights[col_idx] * (pivoted_filled_datas[column][prd_idx + period_term] / pivoted_filled_datas[column][prd_idx + period_term - 1] - 1))
-        print(pivoted_droped_data.index[prd_idx + period_term - 1], profit)
-    total_profit += profit
-print(total_profit)
+            profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
+            output[date][col_idx] = rst_weights[col_idx]
+        output[date]['Profit'] = profit
+    total_profit *= profit + 1
+    print(prd_idx, date, profit, total_profit - 1)
+result = pd.DataFrame.from_dict(output).transpose()
+
+if 1:
+    SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
+        , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
+        , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
+        , 'pivoted_droped_data': pivoted_droped_data, 'Result': result})
