@@ -1,77 +1,45 @@
-import os
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from datetime import date
 from datetime import timedelta
-from dateutil import parser
-import xlsxwriter
-import openpyxl
+
 import math
 import copy
 from scipy.optimize import minimize
+import File_Manager as fm
 
 
-
-def SaveExcelFiles(file='test.xlsx', obj_dict=None):
-
-    # 만약 해당 파일이 존재하지 않는 경우 생성
-    workbook = xlsxwriter.Workbook(file)
-    workbook.close()
-
-    # Create a Pandas Excel writer using Openpyxl as the engine.
-    writer = pd.ExcelWriter(file, engine='openpyxl')
-    # 주의: 파일이 암호화 걸리면 workbook load시 에러 발생
-    writer.book = openpyxl.load_workbook(file)
-    # Pandas의 DataFrame 클래스를 그대로 이용해서 엑셀 생성 가능
-    for obj_nm in obj_dict:
-        obj_dict[obj_nm].to_excel(writer, sheet_name=obj_nm)
-    writer.save()
-
-    return True
 
 # List up CSV files from default folder
-folder_dir = './CSV/'
-csv_file_list = os.listdir(folder_dir)
-#print(csv_file_list)
+base_folder = './CSV/'
+ex_list = ('FTSE China 50 Total Return', 'iBovespa Futures'
+  , 'MSCI Brazil 25-50 Net Return', 'MSCI International EAFE Net'
+  , 'MVIS Global Junior Gold Miners TR Net', 'Nifty 50 Futures', 'MVIS Russia TR Net'
+  , 'US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures')
+datas = fm.ReadCSVFiles(base_folder, ex_list)
 
-# Read data from CSV files and Make data frame
-datas = pd.DataFrame()
-for csv_file in csv_file_list:
-    # Pass, if not CSV file
-    if csv_file[-3:] != 'csv':
-        continue
-
-    if csv_file[:-20] in ('FTSE China 50 Total Return', 'iBovespa Futures'
-                          , 'MSCI Brazil 25-50 Net Return', 'MSCI International EAFE Net'
-                          , 'MVIS Global Junior Gold Miners TR Net', 'Nifty 50 Futures', 'MVIS Russia TR Net'
-                          , 'US 10 Year T-Note Futures', 'US 30 Year T-Bond Futures'):
-        print('Pass: ', csv_file[:-20])
-        continue
-
-    df = pd.read_csv('%s%s' % (folder_dir, csv_file)) # Read CSV file
-    df['Name'] = csv_file[:-20] # Set name of data
-    df['Date2'] = df['Date'].apply(lambda x: parser.parse(x)) # Change date format
-    datas = pd.concat([datas, df], ignore_index=True) # Merge new data to previous data
-    #print(df)
-#print(datas)
-
-
+# Sampling 데이터가 휴일인 경우 가장 최근 영업일 데이터를 찾기 위해 사용
 reference_list = datas.resample('D', on='Date2', convention="end")
 reference_datas = datas.loc[datas['Date2'].isin(list(reference_list.indices))]
 pivoted_reference_datas = reference_datas.pivot(index='Date2', columns='Name', values='Price')
 #print(pivoted_reference_datas)
 
+# Sampling 데이터 생성
 sample_list = datas.resample('M', on='Date2', convention="end")
 sample_datas = datas.loc[datas['Date2'].isin(list(sample_list.indices))]
 pivoted_sample_datas = sample_datas.pivot(index='Date2', columns='Name', values='Price')
 #print(pivoted_sample_datas)
 
 
-
+# Index의 타입을 Timestamp에서 Date로 변경
 pivoted_sample_datas.index = [date(index.year, index.month, index.day) for index in pivoted_sample_datas.index]
+# Sampling 데이터가 휴일인 경우 가장 최근 영업일 데이터로 채움
 pivoted_inserted_datas = copy.deepcopy(pivoted_sample_datas)
 for num, index in enumerate(pivoted_sample_datas.index):
+    # 기본로직(Month 단위): After next month의 1일 전일
+
+    # 10월 이후의 경우 After next month는 year가 넘어간다.
     year = index.year + 1 if index.month > 10 else index.year
     if index.month == 11:
         month = 1
@@ -80,12 +48,17 @@ for num, index in enumerate(pivoted_sample_datas.index):
     else:
         month = index.month + 2
 
+    # After next month의 1일 전으로 월별 말일을 찾음.
     next_last_date = date(year, month, 1) + timedelta(days=-1)
 
-    if len(pivoted_sample_datas.index) > num + 1:
+    # 마지말까지 확인전인 경우
+    if num + 1 < len(pivoted_sample_datas.index):
         #print(num, len(pivoted_sample_datas.index), index, next_last_date, pivoted_sample_datas.index[num+1] == next_last_date)
+
+        # 다음 Sampling 데이터와 다음달 말일이 다른 경우
         if pivoted_sample_datas.index[num+1] != next_last_date:
             pivoted_inserted_datas = pd.concat([pivoted_inserted_datas, pd.DataFrame(index=[next_last_date], columns=pivoted_inserted_datas.columns)])
+# 새로움 Sampling 데이터는 끝에 추가되기 때문에 날짜로 Sorting
 pivoted_inserted_datas = pivoted_inserted_datas.sort_index(ascending=1)
 
 
@@ -93,6 +66,7 @@ pivoted_filled_datas = copy.deepcopy(pivoted_inserted_datas)
 for column_nm in pivoted_filled_datas.columns:
     for row_nm in pivoted_filled_datas.index:
 
+        # 값이 포맷이 string인 경우 float으로 변경
         if isinstance(pivoted_filled_datas[column_nm][row_nm], str):
             pivoted_filled_datas[column_nm][row_nm] = float(pivoted_filled_datas[column_nm][row_nm].replace(',',''))
 
@@ -119,6 +93,7 @@ for column_nm in pivoted_filled_datas.columns:
             pivoted_filled_datas[column_nm][row_nm] = float(pivoted_filled_datas[column_nm][row_nm])
 
 
+# 지수값을 수익률로 변경
 pivoted_profit_data = pivoted_filled_datas.rolling(window=2).apply(lambda x: x[1] / x[0] - 1)
 
 
@@ -127,6 +102,7 @@ pivoted_droped_data = copy.deepcopy(pivoted_profit_data)
 row_list = copy.deepcopy(pivoted_droped_data.index)
 for row_nm in row_list:
     for column_nm in pivoted_droped_data.columns:
+        # 수익률 생성시 문제있는 셀은 nan값
         if math.isnan(pivoted_droped_data[column_nm][row_nm]) == True:
             pivoted_droped_data.drop(index=row_nm, inplace=True)
             pivoted_filled_datas.drop(index=row_nm, inplace=True)
@@ -254,42 +230,42 @@ def ObjectiveVol(rets, objective_type, target, lb, ub):
     return (result.fun, result.x)
 
 
-objective_type = 2
-total_profit = 1
-period_term = 12
-output = {}
-for prd_idx, index in enumerate(pivoted_droped_data.index):
+for objective_type in range(1, 4):
+    total_profit = 1
+    period_term = 12
+    output = {}
+    for prd_idx, index in enumerate(pivoted_droped_data.index):
 
-    date = pivoted_droped_data.index[prd_idx + period_term - 1]
+        date = pivoted_droped_data.index[prd_idx + period_term - 1]
 
-    #
-    if prd_idx + period_term >= len(pivoted_droped_data):
-        print('break', prd_idx + period_term, len(pivoted_droped_data))
-        break
+        #
+        if prd_idx + period_term >= len(pivoted_droped_data):
+            print('break', prd_idx + period_term, len(pivoted_droped_data))
+            break
 
-    # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
-    output[date] = {}
-    rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.0, ub=0.20)
+        # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
+        output[date] = {}
+        rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.0, ub=0.20)
 
-    total_weight = 0
-    rst_dict = {"Value": rst_value}
-    for rst_idx, weight in enumerate(rst_weights):
-        total_weight += weight * 100
-        rst_dict[pivoted_droped_data.columns[rst_idx]] = int(weight * 100)
-    rst_dict['현금'] = 100 - total_weight
+        total_weight = 0
+        rst_dict = {"Value": rst_value}
+        for rst_idx, weight in enumerate(rst_weights):
+            total_weight += weight * 100
+            rst_dict[pivoted_droped_data.columns[rst_idx]] = int(weight * 100)
+        rst_dict['현금'] = 100 - total_weight
 
-    profit = 0
-    if prd_idx + period_term < len(pivoted_droped_data):
-        for col_idx, column in enumerate(pivoted_droped_data.columns):
-            profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
-            output[date][col_idx] = rst_weights[col_idx]
-        output[date]['Profit'] = profit
-    total_profit *= profit + 1
-    print(prd_idx, date, profit, total_profit - 1)
-result = pd.DataFrame.from_dict(output).transpose()
+        profit = 0
+        if prd_idx + period_term < len(pivoted_droped_data):
+            for col_idx, column in enumerate(pivoted_droped_data.columns):
+                profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
+                output[date][col_idx] = rst_weights[col_idx]
+            output[date]['Profit'] = profit
+        total_profit *= profit + 1
+        print(prd_idx, date, profit, total_profit - 1)
+    result = pd.DataFrame.from_dict(output).transpose()
 
-if 1:
-    SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
-        , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
-        , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
-        , 'pivoted_droped_data': pivoted_droped_data, 'Result': result})
+    if 1:
+        fm.SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
+            , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
+            , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
+            , 'pivoted_droped_data': pivoted_droped_data, 'Result': result})
