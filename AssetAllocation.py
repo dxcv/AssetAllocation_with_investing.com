@@ -268,7 +268,7 @@ for objective_type in range(1, 4):
         for col_idx, column in enumerate(pivoted_droped_data.columns):
             # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
             profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
-            output_weights[date][col_idx] = rst_weights[col_idx]
+            output_weights[date][column] = rst_weights[col_idx]
         acc_profit *= profit + 1
 
         # 결과 데이터
@@ -278,7 +278,6 @@ for objective_type in range(1, 4):
         print(prd_idx, date, profit, acc_profit - 1, math.sqrt(rst_weights.T @ pd.DataFrame.cov(pivoted_droped_data[prd_idx:prd_idx + period_term]) @ rst_weights) * math.sqrt(12))
 
     result = pd.DataFrame.from_dict(output_weights).transpose()
-    result.columns = pivoted_droped_data.columns
     result['Vol'] = output_vol
     result['Profit'] = output_profit
     result['AccProfit'] = output_acc_profit
