@@ -73,8 +73,6 @@ for column_nm in pivoted_filled_datas.columns:
             pivoted_filled_datas[column_nm][row_nm] = float(pivoted_filled_datas[column_nm][row_nm].replace(',',''))
 
         #print(column_nm, "\t", row_nm, "\t", pivoted_sample_datas[column_nm][row_nm], "\t", pivoted_filled_datas[column_nm][row_nm])
-        if column_nm == 'China A50 Futures' and str(row_nm) == '2014-01-31':
-            print(1)
         if math.isnan(pivoted_filled_datas[column_nm][row_nm]) == True:
             # ref_row_nm = copy.copy(row_nm)
             #ref_row_nm = str(row_nm)[:10]
@@ -239,9 +237,12 @@ def ObjectiveVol(rets, objective_type, target, lb, ub):
 
 
 for objective_type in range(1, 4):
-    total_profit = 1
+    acc_profit = 1
     period_term = 12
-    output = {}
+    output_weights = {}
+    output_profit = []
+    output_acc_profit = []
+    output_vol = []
     for prd_idx, index in enumerate(pivoted_droped_data.index):
 
         date = pivoted_droped_data.index[prd_idx + period_term - 1]
@@ -252,8 +253,10 @@ for objective_type in range(1, 4):
             break
 
         # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
-        output[date] = {}
-        rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.0, ub=0.20)
+        output_weights[date] = {}
+        rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.00, ub=0.50)
+
+
 
         total_weight = 0
         rst_dict = {"Value": rst_value}
@@ -265,12 +268,22 @@ for objective_type in range(1, 4):
         profit = 0
         if prd_idx + period_term < len(pivoted_droped_data):
             for col_idx, column in enumerate(pivoted_droped_data.columns):
+                # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
                 profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
-                output[date][col_idx] = rst_weights[col_idx]
-            output[date]['Profit'] = profit
-        total_profit *= profit + 1
-        print(prd_idx, date, profit, total_profit - 1)
-    result = pd.DataFrame.from_dict(output).transpose()
+                output_weights[date][col_idx] = rst_weights[col_idx]
+        acc_profit *= profit + 1
+
+        # 결과 데이터
+        output_profit.append(profit)
+        output_acc_profit.append(acc_profit - 1)
+        output_vol.append(math.sqrt(rst_weights.T @ pd.DataFrame.cov(pivoted_droped_data[prd_idx:prd_idx + period_term]) @ rst_weights) * math.sqrt(12))
+        print(prd_idx, date, profit, acc_profit - 1, math.sqrt(rst_weights.T @ pd.DataFrame.cov(pivoted_droped_data[prd_idx:prd_idx + period_term]) @ rst_weights) * math.sqrt(12))
+
+    result = pd.DataFrame.from_dict(output_weights).transpose()
+    result.columns = pivoted_droped_data.columns
+    result['Vol'] = output_vol
+    result['Profit'] = output_profit
+    result['AccProfit'] = output_profit
 
     if 1:
         fm.SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
