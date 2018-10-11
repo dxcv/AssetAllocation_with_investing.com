@@ -188,7 +188,7 @@ def ObjectiveVol(rets, objective_type, target, lb, ub):
         sigma = variance ** 0.5
         sigma_scale = sigma * np.sqrt(annualize_scale(rets))
 
-        vol_diffs = sigma_scale - (target * 0.95)
+        vol_diffs = sigma_scale - (target * 1.00)
 
         return (vol_diffs)
 
@@ -198,7 +198,7 @@ def ObjectiveVol(rets, objective_type, target, lb, ub):
         sigma = variance ** 0.5
         sigma_scale = sigma * np.sqrt(annualize_scale(rets))
 
-        vol_diffs = (target * 1.05) - sigma_scale
+        vol_diffs = (target * 1.00) - sigma_scale
 
         return (vol_diffs)
 
@@ -237,40 +237,38 @@ def ObjectiveVol(rets, objective_type, target, lb, ub):
 
 
 for objective_type in range(1, 4):
+
+    # hyper-parameter
     acc_profit = 1
-    period_term = 12
-    output_weights = {}
-    output_profit = []
-    output_acc_profit = []
-    output_vol = []
+    period_term = 24 # Covariance Matrix 계산을 위한 기간 (12, 36 보다 24가 좋았음)
+
+    # 결과 저장 parameter
+    output_weights = {} # 기간별 & 자산별 가중치
+    output_profit = [] # 기간별 포트폴리오 수익률
+    output_acc_profit = [] # 기간별 포트폴리오 누적 수익률
+    output_vol = [] # 기간별 포트폴리오 변동성
+
     for prd_idx, index in enumerate(pivoted_droped_data.index):
 
+        # 자산배분 결정일 (익일에 결정일 종가까지를 이용해서 계산)
         date = pivoted_droped_data.index[prd_idx + period_term - 1]
 
-        #
-        if prd_idx + period_term >= len(pivoted_droped_data):
+        # 마지막 결정일은 시뮬레이션 불가
+        if index >= pivoted_droped_data.index[-period_term]:
             print('break', prd_idx + period_term, len(pivoted_droped_data))
             break
 
         # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
         output_weights[date] = {}
-        rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.08, lb=0.00, ub=0.50)
+        rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.1, lb=0.00, ub=1.00)
 
 
-
-        total_weight = 0
-        rst_dict = {"Value": rst_value}
-        for rst_idx, weight in enumerate(rst_weights):
-            total_weight += weight * 100
-            rst_dict[pivoted_droped_data.columns[rst_idx]] = int(weight * 100)
-        rst_dict['현금'] = 100 - total_weight
-
+        # 결과 저장을 위해 Container에 입력
         profit = 0
-        if prd_idx + period_term < len(pivoted_droped_data):
-            for col_idx, column in enumerate(pivoted_droped_data.columns):
-                # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
-                profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
-                output_weights[date][col_idx] = rst_weights[col_idx]
+        for col_idx, column in enumerate(pivoted_droped_data.columns):
+            # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
+            profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
+            output_weights[date][col_idx] = rst_weights[col_idx]
         acc_profit *= profit + 1
 
         # 결과 데이터
@@ -283,7 +281,7 @@ for objective_type in range(1, 4):
     result.columns = pivoted_droped_data.columns
     result['Vol'] = output_vol
     result['Profit'] = output_profit
-    result['AccProfit'] = output_profit
+    result['AccProfit'] = output_acc_profit
 
     if 1:
         fm.SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
