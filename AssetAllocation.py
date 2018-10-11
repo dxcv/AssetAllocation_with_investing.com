@@ -33,6 +33,7 @@ pivoted_sample_datas = sample_datas.pivot(index='Date2', columns='Name', values=
 
 
 # Index의 타입을 Timestamp에서 Date로 변경
+pivoted_reference_datas.index = [date(index.year, index.month, index.day) for index in pivoted_reference_datas.index]
 pivoted_sample_datas.index = [date(index.year, index.month, index.day) for index in pivoted_sample_datas.index]
 # Sampling 데이터가 휴일인 경우 가장 최근 영업일 데이터로 채움
 pivoted_inserted_datas = copy.deepcopy(pivoted_sample_datas)
@@ -52,11 +53,12 @@ for num, index in enumerate(pivoted_sample_datas.index):
     next_last_date = date(year, month, 1) + timedelta(days=-1)
 
     # 마지말까지 확인전인 경우
-    if num + 1 < len(pivoted_sample_datas.index):
+    #if num + 1 < len(pivoted_sample_datas.index):
+    if pivoted_sample_datas.index[-1] < pivoted_reference_datas.index[-1]:
         #print(num, len(pivoted_sample_datas.index), index, next_last_date, pivoted_sample_datas.index[num+1] == next_last_date)
-
-        # 다음 Sampling 데이터와 다음달 말일이 다른 경우
-        if pivoted_sample_datas.index[num+1] != next_last_date:
+        #print(next_last_date)
+        # 다음 Sampling 데이터가 휴일이어서 데이터가 없는 경우 or 다음 Sampling 데이터와 다음달 말일이 다른 경우
+        if next_last_date > pivoted_sample_datas.index[-1] or pivoted_sample_datas.index[num+1] != next_last_date:
             pivoted_inserted_datas = pd.concat([pivoted_inserted_datas, pd.DataFrame(index=[next_last_date], columns=pivoted_inserted_datas.columns)])
 # 새로움 Sampling 데이터는 끝에 추가되기 때문에 날짜로 Sorting
 pivoted_inserted_datas = pivoted_inserted_datas.sort_index(ascending=1)
@@ -70,10 +72,13 @@ for column_nm in pivoted_filled_datas.columns:
         if isinstance(pivoted_filled_datas[column_nm][row_nm], str):
             pivoted_filled_datas[column_nm][row_nm] = float(pivoted_filled_datas[column_nm][row_nm].replace(',',''))
 
-        #print(column_nm, "\t", row_nm, "\t", type(pivoted_sample_datas[column_nm][row_nm]))
+        #print(column_nm, "\t", row_nm, "\t", pivoted_sample_datas[column_nm][row_nm], "\t", pivoted_filled_datas[column_nm][row_nm])
+        if column_nm == 'China A50 Futures' and str(row_nm) == '2014-01-31':
+            print(1)
         if math.isnan(pivoted_filled_datas[column_nm][row_nm]) == True:
             # ref_row_nm = copy.copy(row_nm)
-            ref_row_nm = str(row_nm)[:10]
+            #ref_row_nm = str(row_nm)[:10]
+            ref_row_nm = row_nm
 
             # 해당일에 데이터가 없는 경우 가장 최근 값을 대신 사용함
             for loop_cnt in range(10):
@@ -81,12 +86,15 @@ for column_nm in pivoted_filled_datas.columns:
                     float_value = float(pivoted_reference_datas[column_nm][ref_row_nm].replace(',', '')) if isinstance(pivoted_reference_datas[column_nm][ref_row_nm], str) else pivoted_reference_datas[column_nm][ref_row_nm]
                     if math.isnan(float_value) == True:
                         # print("No Data", str(ref_row_nm))
-                        ref_row_nm = str(datetime.strptime(ref_row_nm, '%Y-%m-%d').date() - timedelta(days=1))
+                        #ref_row_nm = str(datetime.strptime(ref_row_nm, '%Y-%m-%d').date() - timedelta(days=1))
+                        ref_row_nm = ref_row_nm - timedelta(days=1)
                     else:
                         pivoted_filled_datas[column_nm][row_nm] = float_value
+                        break
                 except KeyError:
                     # print("KeyError", str(ref_row_nm))
-                    ref_row_nm = str(datetime.strptime(ref_row_nm, '%Y-%m-%d').date() - timedelta(days=1))
+                    #ref_row_nm = str(datetime.strptime(ref_row_nm, '%Y-%m-%d').date() - timedelta(days=1))
+                    ref_row_nm = ref_row_nm - timedelta(days=1)
 
         # 이후 연산작업을 위해 decimal을 float 형태로 변경
         if math.isnan(pivoted_filled_datas[column_nm][row_nm]) == False:
