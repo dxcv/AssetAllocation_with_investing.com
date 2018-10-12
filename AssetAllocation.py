@@ -244,32 +244,40 @@ for objective_type in range(1, 4):
 
     # 결과 저장 parameter
     output_weights = {} # 기간별 & 자산별 가중치
+    output_vols = {}
     output_profit = [] # 기간별 포트폴리오 수익률
     output_acc_profit = [] # 기간별 포트폴리오 누적 수익률
     output_vol = [] # 기간별 포트폴리오 변동성
 
     for prd_idx, index in enumerate(pivoted_droped_data.index):
 
-        # 자산배분 결정일 (익일에 결정일 종가까지를 이용해서 계산)
-        date = pivoted_droped_data.index[prd_idx + period_term - 1]
-
-        # 마지막 결정일은 시뮬레이션 불가
-        if index >= pivoted_droped_data.index[-period_term]:
+        # 마지막 결정일은 weight 산출만 가능, 그 이후는 불가
+        if index > pivoted_droped_data.index[-period_term]:
             print('break', prd_idx + period_term, len(pivoted_droped_data))
             break
 
+
+        # 자산배분 결정일 (익일에 결정일 종가까지를 이용해서 계산)
+        date = pivoted_droped_data.index[prd_idx + period_term - 1]
+
         # lb는 자산별 최소비율(%), ub는 자산별 최대비율(%)
         output_weights[date] = {}
+        output_vols[date] = {}
         rst_value, rst_weights = ObjectiveVol(pivoted_droped_data[prd_idx:prd_idx + period_term], objective_type, target=0.1, lb=0.00, ub=1.00)
-
+        asset_vols = pd.DataFrame.var(pivoted_droped_data[prd_idx:prd_idx + period_term])
 
         # 결과 저장을 위해 Container에 입력
         profit = 0
         for col_idx, column in enumerate(pivoted_droped_data.columns):
-            # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
-            profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
             output_weights[date][column] = rst_weights[col_idx]
-        acc_profit *= profit + 1
+            output_vols[date][column] = asset_vols.values[col_idx]
+
+            if index < pivoted_droped_data.index[-period_term]:
+                # 예를 들어 0~11까지 수익률로 변동성을 구하면 12의 수익률을 사용.
+                profit += rst_weights[col_idx] * pivoted_droped_data[column][prd_idx + period_term]
+
+        if index < pivoted_droped_data.index[-period_term]:
+            acc_profit *= profit + 1
 
         # 결과 데이터
         output_profit.append(profit)
@@ -286,4 +294,4 @@ for objective_type in range(1, 4):
         fm.SaveExcelFiles(file='pivoted_data_%s.xlsx' % (objective_type), obj_dict={'pivoted_reference_datas': pivoted_reference_datas
             , 'pivoted_sample_datas': pivoted_sample_datas, 'pivoted_inserted_datas': pivoted_inserted_datas
             , 'pivoted_filled_datas': pivoted_filled_datas, 'pivoted_profit_data': pivoted_profit_data
-            , 'pivoted_droped_data': pivoted_droped_data, 'Result': result})
+            , 'pivoted_droped_data': pivoted_droped_data, 'Result': result , 'AssetVols': pd.DataFrame.from_dict(output_vols).transpose()})
